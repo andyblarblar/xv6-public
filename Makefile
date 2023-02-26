@@ -167,6 +167,7 @@ mkfs: mkfs.c fs.h
 
 UPROGS=\
 	_hello\
+	_date\
 	_cat\
 	_echo\
 	_forktest\
