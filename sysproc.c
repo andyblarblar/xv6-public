@@ -94,7 +94,9 @@ int
 sys_date(void)
 {
     char* mem;
-    argptr(0, &mem, sizeof(struct rtcdate));
+    if (argptr(0, &mem, sizeof(struct rtcdate))) {
+        return -1;
+    }
 
     struct rtcdate* data = (struct rtcdate*) mem;
 
