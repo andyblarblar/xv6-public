@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+#include "pstat.h"
 
 int
 sys_fork(void)
@@ -101,5 +102,52 @@ sys_date(void)
     struct rtcdate* data = (struct rtcdate*) mem;
 
     cmostime(data);
+    return 0;
+}
+
+int
+sys_settickets(void)
+{
+    int num;
+    if (argint(0, &num)) {
+        return -1;
+    }
+
+    // Validate number is in range
+    if (num > 100000 || num < 0) {
+        return -1;
+    }
+
+    // Update procs ticket count
+    myproc()->tickets = num;
+
+    return 0;
+}
+
+int
+sys_getpinfo(void)
+{
+    char* mem;
+    if (argptr(0, &mem, sizeof(struct pstat))) {
+        return -1;
+    }
+
+    // null check
+    if (!mem) {
+        return -1;
+    }
+
+    struct pstat* stats = (struct pstat*) mem;
+
+    // Defer to impl in proc.c since ptable is only available there
+    getpinfo_impl(stats);
+
+    return 0;
+}
+
+int
+sys_yield(void)
+{
+    yield();
     return 0;
 }

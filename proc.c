@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "random.h"
 
 struct {
   struct spinlock lock;
@@ -142,6 +143,9 @@ userinit(void)
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
+  p->ticks = 0;
+  p->tickets = 10;
+
   // this assignment to p->state lets other cores
   // run this process. the acquire forces the above
   // writes to be visible, and the lock is also needed
@@ -211,6 +215,10 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
+
+  np->ticks = 0;
+  // Inherit tickets from parent
+  np->tickets = curproc->tickets;
 
   acquire(&ptable.lock);
 
@@ -322,19 +330,46 @@ wait(void)
 void
 scheduler(void)
 {
+    // Seed rand
+   srand(0);
+
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
+    // Get pinfo for number of tickets. Cannot use syscall as we are in kernel mode
+    // NOTE: must to this before acquiring lock, or we deadlock on ptable
+    struct pstat info;
+    getpinfo_impl(&info);
+
+    // Find total tickets via sum
+    int total_tickets = 0;
+    for(int i=0; i < info.num_processes; i++) {
+        total_tickets += info.tickets[i];
+    }
+
+    // Run lottery drawing
     acquire(&ptable.lock);
+    int counter = 0;
+    int winner = rand() % total_tickets + 1;
+
+    // Iterate until we find our winning proc
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
+
+      // Aggregate tickets until our winning proc is found
+      counter += p->tickets;
+      if (counter <= winner) {
+          continue;
+      }
+
+      // If we are here, then p is the winner
+      p->ticks++;
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
@@ -349,9 +384,11 @@ scheduler(void)
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
+
+      // Re-run lottery process to find next proc
+      break;
     }
     release(&ptable.lock);
-
   }
 }
 
@@ -531,4 +568,28 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+void getpinfo_impl(struct pstat* stats) {
+    acquire(&ptable.lock);
+
+    // Need to zero explicitly since some people can't behave
+    stats->num_processes = 0;
+
+    int i = 0;
+    // Gather info from each proc
+    for(struct proc* p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if (p->state == UNUSED) {
+            continue;
+        }
+        stats->num_processes++;
+        stats->pid[i] = p->pid;
+        stats->tickets[i] = p->tickets;
+        stats->ticks[i] = p->ticks;
+
+        // Inc array index here so we ignore unused procs
+        i++;
+    }
+
+    release(&ptable.lock);
 }
